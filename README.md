@@ -1,8 +1,4 @@
 # Overview
 
-Produce messages to and consume messages from a Kafka cluster using the Java Producer and Consumer, and Kafka Streams API.
+This application is for the purpose of providing an alternative solution to the problem of heavy loads during exam applicaitons in Neptun using Kafka messaging-system, CQS pattern and Event-sourcing. The application shows a primitive scenario in which Students apply for exams, these applications are handled and processed by the Command model, which then produces messages on to the Kafka Event Log about the succesful applications. Based on the Event Log, the Query model represents the applications in a certain way.
 
-
-# Documentation
-
-You can find the documentation and instructions for running this Java example at [https://docs.confluent.io/platform/current/tutorials/examples/clients/docs/java.html](https://docs.confluent.io/platform/current/tutorials/examples/clients/docs/java.html?utm_source=github&utm_medium=demo&utm_campaign=ch.examples_type.community_content.clients-ccloud)

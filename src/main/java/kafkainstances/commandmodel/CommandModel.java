@@ -3,6 +3,10 @@ package kafkainstances.commandmodel;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.OutOfOrderSequenceException;
+import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TopicExistsException;
 import recordmodels.ExamApplicationRecord;
 import recordmodels.Subject;
@@ -23,16 +27,26 @@ import java.util.concurrent.ExecutionException;
  */
 public class CommandModel implements IExamApplied, Runnable {
 
+    private static CommandModel instance = null;
+    public static final Object lock = new Object();
+
     Queue<ExamApplicationRecord> applicationRecords = new ArrayBlockingQueue<>(100);
+
+    public static CommandModel getInstance() {
+        if (instance == null)
+            instance = new CommandModel();
+        return instance;
+    }
+
+    private CommandModel(){}
 
     @Override
     public void AppliedForExam(Student student, Subject subject, Date date) {
         ExamApplicationRecord record = new ExamApplicationRecord(
                 student.getName(), student.getUserId(), subject, date, System.nanoTime());
-        synchronized (applicationRecords) {
-            applicationRecords.add(record);
-            //System.out.println("Added" + applicationRecords.size());
-        }
+
+        applicationRecords.add(record);
+        System.out.println("Added" + record.getUserId());
     }
 
     public void produce(ExamApplicationRecord record){
@@ -57,43 +71,76 @@ public class CommandModel implements IExamApplied, Runnable {
         createTopic(topic, props);
 
         // Add additional properties.
-        //props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.ACKS_CONFIG, "0");
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.IntegerSerializer");
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaJsonSerializer");
+        props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "my-transactional-id");
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
 
         Producer<Integer, ExamApplicationRecord> producer = new KafkaProducer<Integer, ExamApplicationRecord>(props);
         // Produce sample data
 
-        Integer i = 0;
-        while(true) {
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        producer.initTransactions();
+
+        synchronized (lock) {
+            lock.notifyAll();
+        }
+        /*int i = 0;
+        while (true) {
             if (!applicationRecords.isEmpty()) {
                 for (ExamApplicationRecord record : applicationRecords) {
-                    //System.out.println("Producing record: " + i + "\t" + record.toString());
-                    //Thread.sleep(10);
-                    producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), new Callback() {
-                        @Override
-                        public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+                    System.out.println("Producing record: " + i + "\t" + record.toString() + " Size of records: " + applicationRecords.size());
+                    try {
+                        producer.beginTransaction();
+                        producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), (recordMetadata, e) -> {
                             if (e != null) {
                                 e.printStackTrace();
                             }
-                        }
-                    });
-                    applicationRecords.remove();
-                    //System.out.println(applicationRecords.size());
-                }
-                /*ExamApplicationRecord record = applicationRecords.remove();
-                producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), new Callback() {
-                    @Override
-                    public void onCompletion(RecordMetadata recordMetadata, Exception e) {
-                        if (e != null) {
-                            e.printStackTrace();
-                        }
+                        });
+                        applicationRecords.remove();
+                        producer.commitTransaction();
+                    } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
+                        // We can't recover from these exceptions, so our only option is to close the producer and exit.
+                        producer.close();
+                    } catch (KafkaException e) {
+                        // For all other exceptions, just abort the transaction and try again.
+                        producer.abortTransaction();
                     }
-                });*/
+                }
+            }
+        }*/
 
+        int i = 0;
+        while (true) {
+            try {
+                producer.beginTransaction();
+                if (!applicationRecords.isEmpty()) {
+                    for (ExamApplicationRecord record : applicationRecords) {
+                        System.out.println("Producing record: " + i + "\t" + record.toString() + " Size of records: " + applicationRecords.size());
+                        producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), (recordMetadata, e) -> {
+                            if (e != null) {
+                                e.printStackTrace();
+                            }
+                        });
+                        applicationRecords.remove();
+                    }
+                }
+                producer.commitTransaction();
+            } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
+                // We can't recover from these exceptions, so our only option is to close the producer and exit.
+                producer.close();
+            } catch (KafkaException e) {
+                // For all other exceptions, just abort the transaction and try again.
+                producer.abortTransaction();
             }
         }
+
         //producer.flush();
 
         //producer.close();

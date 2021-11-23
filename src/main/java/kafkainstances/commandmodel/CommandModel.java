@@ -13,14 +13,12 @@ import recordmodels.Subject;
 import students.IExamApplied;
 import students.Student;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
+
+import static main.Main.loadConfig;
 
 /**
  * Command model of the CQRS pattern, can understand incoming exam applications, and produce messages based on these applications
@@ -49,16 +47,8 @@ public class CommandModel implements IExamApplied, Runnable {
         System.out.println("Added" + record.getUserId());
     }
 
-    public void produce(ExamApplicationRecord record){
-
-    }
     @Override
     public void run() {
-        // Load properties from a local configuration file
-        // Create the configuration file (e.g. at '$HOME/.confluent/java.config') with configuration parameters
-        // to connect to your Kafka cluster, which can be on your local host, Confluent Cloud, or any other cluster.
-        // Follow these instructions to create this file: https://docs.confluent.io/platform/current/tutorials/examples/clients/docs/java.html
-        //TODO: creating config file and giving filepath
         Properties props = null;
         try {
             props = loadConfig("C:\\Users\\koss6\\IntelliJIDEAProjects\\java.cfg");
@@ -66,19 +56,17 @@ public class CommandModel implements IExamApplied, Runnable {
             e.printStackTrace();
         }
 
-        // Create topic if needed //TODO: selecting topic name
         final String topic = "NewTopic";
         createTopic(topic, props);
 
         // Add additional properties.
         props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.IntegerSerializer");
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.LongSerializer");
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaJsonSerializer");
         props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "my-transactional-id");
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
 
-        Producer<Integer, ExamApplicationRecord> producer = new KafkaProducer<Integer, ExamApplicationRecord>(props);
-        // Produce sample data
+        Producer<Long, ExamApplicationRecord> producer = new KafkaProducer<Long, ExamApplicationRecord>(props);
 
         try {
             Thread.sleep(1000);
@@ -91,59 +79,13 @@ public class CommandModel implements IExamApplied, Runnable {
         synchronized (lock) {
             lock.notifyAll();
         }
-        /*int i = 0;
-        while (true) {
-            if (!applicationRecords.isEmpty()) {
-                for (ExamApplicationRecord record : applicationRecords) {
-                    System.out.println("Producing record: " + i + "\t" + record.toString() + " Size of records: " + applicationRecords.size());
-                    try {
-                        producer.beginTransaction();
-                        producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), (recordMetadata, e) -> {
-                            if (e != null) {
-                                e.printStackTrace();
-                            }
-                        });
-                        applicationRecords.remove();
-                        producer.commitTransaction();
-                    } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
-                        // We can't recover from these exceptions, so our only option is to close the producer and exit.
-                        producer.close();
-                    } catch (KafkaException e) {
-                        // For all other exceptions, just abort the transaction and try again.
-                        producer.abortTransaction();
-                    }
-                }
-            }
-        }*/
 
-        int i = 0;
-        while (true) {
-            try {
-                producer.beginTransaction();
-                if (!applicationRecords.isEmpty()) {
-                    for (ExamApplicationRecord record : applicationRecords) {
-                        System.out.println("Producing record: " + i + "\t" + record.toString() + " Size of records: " + applicationRecords.size());
-                        producer.send(new ProducerRecord<Integer, ExamApplicationRecord>(topic, i++, record), (recordMetadata, e) -> {
-                            if (e != null) {
-                                e.printStackTrace();
-                            }
-                        });
-                        applicationRecords.remove();
-                    }
-                }
-                producer.commitTransaction();
-            } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
-                // We can't recover from these exceptions, so our only option is to close the producer and exit.
-                producer.close();
-            } catch (KafkaException e) {
-                // For all other exceptions, just abort the transaction and try again.
-                producer.abortTransaction();
-            }
-        }
+        TransactionForEachRecord(producer, topic);
+        //TransactionForMultipleRecords(producer, topic);
+        //ProducingWithoutTransactions(producer, topic);
 
-        //producer.flush();
-
-        //producer.close();
+        producer.flush();
+        producer.close();
     }
 
     // Create topic in Confluent Cloud
@@ -159,14 +101,82 @@ public class CommandModel implements IExamApplied, Runnable {
             }
         }
     }
-    public static Properties loadConfig(final String configFile) throws IOException {
-        if (!Files.exists(Paths.get(configFile))) {
-            throw new IOException(configFile + " not found.");
+
+    private void TransactionForMultipleRecords(Producer<Long, ExamApplicationRecord> producer, String topic){
+        int i = 0;
+        boolean started = false;
+        while (true) {
+            try {
+                if (!applicationRecords.isEmpty()) {
+                    started = true;
+                    producer.beginTransaction();
+                    System.out.println("Starting transaction-----------------------------------------");
+                    for (ExamApplicationRecord record : applicationRecords) {
+                        ProduceSingleRecord(i++, record, producer, topic);
+                        applicationRecords.remove();
+                    }
+                    producer.commitTransaction();
+                    System.out.println("Committing-----------------------------------------");
+                }else if(started){
+                    break;
+                }
+
+            } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
+                // We can't recover from these exceptions, so our only option is to close the producer and exit.
+                producer.close();
+            } catch (KafkaException e) {
+                // For all other exceptions, just abort the transaction and try again.
+                producer.abortTransaction();
+            }
         }
-        final Properties cfg = new Properties();
-        try (InputStream inputStream = new FileInputStream(configFile)) {
-            cfg.load(inputStream);
-        }
-        return cfg;
     }
+
+    private void TransactionForEachRecord(Producer<Long, ExamApplicationRecord> producer, String topic){
+        int i = 0;
+        boolean started = false;
+        while (true) {
+            if (!applicationRecords.isEmpty()) {
+                started = true;
+                for (ExamApplicationRecord record : applicationRecords) {
+                    try {
+                        producer.beginTransaction();
+                        System.out.println("--Starting transaction--");
+                        ProduceSingleRecord(i++, record, producer, topic);
+                        applicationRecords.remove();
+                        producer.commitTransaction();
+                        System.out.println("--Committing transaction--");
+                    } catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
+                        // We can't recover from these exceptions, so our only option is to close the producer and exit.
+                        producer.close();
+                    } catch (KafkaException e) {
+                        // For all other exceptions, just abort the transaction and try again.
+                        producer.abortTransaction();
+                    }
+                }
+            }else if(started){
+                break;
+            }
+        }
+    }
+
+    private void ProducingWithoutTransactions(Producer<Long, ExamApplicationRecord> producer, String topic){
+        int i = 0;
+        while (true) {
+            if (!applicationRecords.isEmpty()) {
+                for (ExamApplicationRecord record : applicationRecords) {
+                    ProduceSingleRecord(i++, record, producer, topic);
+                    applicationRecords.remove();
+                    producer.commitTransaction();
+                    System.out.println("Committing transaction");
+                }
+            }
+        }
+    }
+
+    private void ProduceSingleRecord(int i, ExamApplicationRecord record, Producer<Long, ExamApplicationRecord> producer, String topic){
+        System.out.println("Producing record: " + i++ + ". record\t" + record.toString() + " Size of records: " + applicationRecords.size());
+        producer.send(new ProducerRecord<Long, ExamApplicationRecord>(topic, System.nanoTime(), record));
+    }
+
+
 }

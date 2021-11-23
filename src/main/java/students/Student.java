@@ -49,6 +49,11 @@ public class Student {
         return examApplication;
     }
 
+    /**
+     * Student applies for an exam
+     * @param subject   The exam's subject
+     * @param date      The date of the exam
+     */
     public void ApplyForExam(Subject subject, Date date){
         examApplication.AppliedForExam(this, subject, date);
     }

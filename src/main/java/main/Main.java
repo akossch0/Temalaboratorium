@@ -4,10 +4,12 @@ import kafkainstances.commandmodel.CommandModel;
 import recordmodels.Subject;
 import students.Student;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.*;
 
 public class Main {
     public static void main(final String[] args) throws InterruptedException {
@@ -27,15 +29,26 @@ public class Main {
         }
         Runnable applicationGenerator = () -> {
             for (Student s : students) {
-                try {
-                    Thread.sleep(3);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+                //try {
+                //    Thread.sleep(3);
+                //} catch (InterruptedException e) {
+                //    e.printStackTrace();
+                //}
                 s.ApplyForExam(Subject.TERMINFO, new Date(System.currentTimeMillis()));
             }
         };
         new Thread(applicationGenerator, "simulate").start();
 
+    }
+
+    public static Properties loadConfig(final String configFile) throws IOException {
+        if (!Files.exists(Paths.get(configFile))) {
+            throw new IOException(configFile + " not found.");
+        }
+        final Properties cfg = new Properties();
+        try (InputStream inputStream = new FileInputStream(configFile)) {
+            cfg.load(inputStream);
+        }
+        return cfg;
     }
 }

@@ -1,5 +1,6 @@
 package kafkainstances.commandmodel;
 
+import main.Main;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.*;
@@ -104,11 +105,9 @@ public class CommandModel implements IExamApplied, Runnable {
 
     private void TransactionForMultipleRecords(Producer<Long, ExamApplicationRecord> producer, String topic){
         int i = 0;
-        boolean started = false;
         while (true) {
             try {
                 if (!applicationRecords.isEmpty()) {
-                    started = true;
                     producer.beginTransaction();
                     System.out.println("Starting transaction-----------------------------------------");
                     for (ExamApplicationRecord record : applicationRecords) {
@@ -117,7 +116,8 @@ public class CommandModel implements IExamApplied, Runnable {
                     }
                     producer.commitTransaction();
                     System.out.println("Committing-----------------------------------------");
-                }else if(started){
+                }else if(Main.finished){
+                    System.out.println("breaking");
                     break;
                 }
 
@@ -133,10 +133,8 @@ public class CommandModel implements IExamApplied, Runnable {
 
     private void TransactionForEachRecord(Producer<Long, ExamApplicationRecord> producer, String topic){
         int i = 0;
-        boolean started = false;
         while (true) {
             if (!applicationRecords.isEmpty()) {
-                started = true;
                 for (ExamApplicationRecord record : applicationRecords) {
                     try {
                         producer.beginTransaction();
@@ -153,7 +151,7 @@ public class CommandModel implements IExamApplied, Runnable {
                         producer.abortTransaction();
                     }
                 }
-            }else if(started){
+            }else if(Main.finished){
                 break;
             }
         }

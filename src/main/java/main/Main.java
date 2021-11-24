@@ -12,6 +12,7 @@ import java.nio.file.Paths;
 import java.util.*;
 
 public class Main {
+    public static boolean finished = false;
     public static void main(final String[] args) throws InterruptedException {
 
         CommandModel commandModel = CommandModel.getInstance();
@@ -27,16 +28,20 @@ public class Main {
         synchronized (CommandModel.lock){
             CommandModel.lock.wait();
         }
+        Random rand = new Random();
         Runnable applicationGenerator = () -> {
             for (Student s : students) {
-                //try {
-                //    Thread.sleep(3);
-                //} catch (InterruptedException e) {
-                //    e.printStackTrace();
-                //}
+                try {
+                    //sleep for a random number of ms between 20 and 70
+                    Thread.sleep(rand.nextInt(50) + 20);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
                 s.ApplyForExam(Subject.TERMINFO, new Date(System.currentTimeMillis()));
             }
+            finished = true;
         };
+
         new Thread(applicationGenerator, "simulate").start();
 
     }
